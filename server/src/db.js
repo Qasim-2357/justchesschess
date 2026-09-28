@@ -50,3 +50,15 @@ export async function recordGameResult({ whiteUserId, blackUserId, winnerUserId,
     await pool.query(`UPDATE users SET losses = losses + 1 WHERE id = $1`, [loserUserId]);
   }
 }
+// Returns a user's win rate (0 to 1). New players with no finished games
+// get a neutral 0.5, so they're not treated as unusually strong or weak.
+export async function getWinRate(userId) {
+  const result = await pool.query(
+    "SELECT wins, losses FROM users WHERE id = $1",
+    [userId],
+  );
+  const user = result.rows[0];
+  if (!user) return 0.5;
+  const total = user.wins + user.losses;
+  return total === 0 ? 0.5 : user.wins / total;
+}

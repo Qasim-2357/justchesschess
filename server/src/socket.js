@@ -1,9 +1,11 @@
 import jwt from "jsonwebtoken";
 import { Queue } from "./game/matchmaking.js";
 import { GameManager } from "./game/gameManager.js";
-import { recordGameResult } from "./db.js";
+import { recordGameResult, getWinRate } from "./db.js";
 
 const DISCONNECT_GRACE_MS = Number(process.env.DISCONNECT_GRACE_MS) || 30 * 1000;
+const MATCHMAKING_RETRY_MS = 2000;
+
 export function registerSocketHandlers(io) {
   const queue = new Queue();
   const gameManager = new GameManager();
@@ -24,6 +26,25 @@ export function registerSocketHandlers(io) {
   function emitToPlayers(game, event, payload) {
     io.to(game.players.white).emit(event, payload);
     io.to(game.players.black).emit(event, payload);
+  }
+
+  // Drains the queue of every currently valid pair (there could be more
+  // than one waiting pair at once) and starts a game for each.
+  function attemptMatches() {
+    let pair;
+    while ((pair = queue.tryMatch())) {
+      const game = gameManager.createGame(pair[0], pair[1]);
+      for (const playerId of Object.values(game.players)) {
+        io.to(playerId).emit("game:start", {
+          gameId: game.gameId,
+          color: game.colors[playerId],
+          fen: game.fen,
+          clocks: game.clocks,
+          timeMs: game.timeMs,
+          usernames: game.usernames,
+        });
+      }
+    }
   }
 
   async function emitGameOver(gameId) {
@@ -63,10 +84,6 @@ export function registerSocketHandlers(io) {
   }
 
   io.on("connection", (socket) => {
-    // A brand-new connection can belong to someone with a game already in
-    // progress (they disconnected and are coming back). Rebind their socket
-    // so moves route correctly, then ask them to explicitly confirm rejoining
-    // rather than dropping them straight back into the board.
     const active = gameManager.getActiveGameForUser(socket.data.userId);
     if (active) {
       const rebind = gameManager.rebindSocket(active.gameId, socket.data.userId, socket.id);
@@ -125,30 +142,19 @@ export function registerSocketHandlers(io) {
       io.to(opponentId).emit("opponent:reconnected", { gameId });
     });
 
-    socket.on("queue:join", () => {
+    socket.on("queue:join", async () => {
       const currentGameId = gameManager.socketGames.get(socket.id);
       const currentGame = gameManager.games.get(currentGameId);
       if (currentGame?.status === "ongoing") return;
 
+      const winRate = await getWinRate(socket.data.userId);
       queue.addPlayer({
         socketId: socket.id,
         userId: socket.data.userId,
         username: socket.data.username,
+        winRate,
       });
-      const pair = queue.tryMatch();
-      if (!pair) return;
-
-      const game = gameManager.createGame(pair[0], pair[1]);
-      for (const playerId of Object.values(game.players)) {
-        io.to(playerId).emit("game:start", {
-          gameId: game.gameId,
-          color: game.colors[playerId],
-          fen: game.fen,
-          clocks: game.clocks,
-          timeMs: game.timeMs,
-          usernames: game.usernames,
-        });
-      }
+      attemptMatches();
     });
 
     socket.on("queue:leave", () => {
@@ -243,6 +249,11 @@ export function registerSocketHandlers(io) {
     }
   }, 1000);
   clockInterval.unref?.();
+
+  // Re-attempts matching periodically, since tolerance widens with wait
+  // time even if nobody new joins the queue.
+  const matchmakingInterval = setInterval(attemptMatches, MATCHMAKING_RETRY_MS);
+  matchmakingInterval.unref?.();
 
   return { queue, gameManager };
 }
