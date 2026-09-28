@@ -3,47 +3,82 @@ import { Chess } from "chess.js";
 
 const INITIAL_TIME_MS = 10 * 60 * 1000;
 
-// Owns active chess games, player assignments, move validation, and clocks.
 export class GameManager {
   constructor() {
     this.games = new Map();
     this.socketGames = new Map();
+    this.userGames = new Map();
   }
 
-  // Creates a UUID-keyed game and randomly assigns white and black.
-  createGame(firstSocketId, secondSocketId) {
-    if (firstSocketId === secondSocketId) {
+  createGame(firstPlayer, secondPlayer) {
+    if (firstPlayer.socketId === secondPlayer.socketId) {
       throw new Error("A game requires two different players");
     }
 
     const [white, black] = Math.random() < 0.5
-      ? [firstSocketId, secondSocketId]
-      : [secondSocketId, firstSocketId];
+      ? [firstPlayer, secondPlayer]
+      : [secondPlayer, firstPlayer];
     const gameId = randomUUID();
     const game = {
       gameId,
-      players: { white, black },
+      players: { white: white.socketId, black: black.socketId },
+      accounts: { white, black },
       chess: new Chess(),
       clocks: { white: INITIAL_TIME_MS, black: INITIAL_TIME_MS },
       lastTickAt: Date.now(),
       status: "ongoing",
       winner: null,
+      reconnect: {
+        white: { used: false, timer: null, deadline: null },
+        black: { used: false, timer: null, deadline: null },
+      },
     };
 
     this.games.set(gameId, game);
-    this.socketGames.set(white, gameId);
-    this.socketGames.set(black, gameId);
+    this.socketGames.set(white.socketId, gameId);
+    this.socketGames.set(black.socketId, gameId);
+    this.userGames.set(white.userId, gameId);
+    this.userGames.set(black.userId, gameId);
 
     return {
       gameId,
       players: { ...game.players },
-      colors: { [white]: "white", [black]: "black" },
+      colors: { [white.socketId]: "white", [black.socketId]: "black" },
+      usernames: { white: white.username, black: black.username },
       fen: game.chess.fen(),
+      clocks: { ...game.clocks },
       timeMs: INITIAL_TIME_MS,
     };
   }
 
-  // Applies a legal move for the player whose turn it is, or returns an error.
+  getActiveGameForUser(userId) {
+    const gameId = this.userGames.get(userId);
+    const game = this.games.get(gameId);
+    if (game && game.status === "ongoing") return { gameId, game };
+    return null;
+  }
+
+  getColorForUser(game, userId) {
+    if (game.accounts.white.userId === userId) return "white";
+    if (game.accounts.black.userId === userId) return "black";
+    return null;
+  }
+
+  rebindSocket(gameId, userId, newSocketId) {
+    const game = this.games.get(gameId);
+    if (!game) return null;
+    const color = this.getColorForUser(game, userId);
+    if (!color) return null;
+
+    const oldSocketId = game.players[color];
+    this.socketGames.delete(oldSocketId);
+    game.players[color] = newSocketId;
+    game.accounts[color].socketId = newSocketId;
+    this.socketGames.set(newSocketId, gameId);
+
+    return { color, game };
+  }
+
   makeMove(gameId, socketId, from, to, promotion) {
     const game = this.games.get(gameId);
     if (!game) return { error: "Game not found" };
@@ -89,7 +124,6 @@ export class GameManager {
     };
   }
 
-  // Ends a game by resignation and returns the winning socket ID, or null.
   resign(gameId, socketId) {
     const game = this.games.get(gameId);
     if (!game || game.status !== "ongoing") return null;
@@ -105,7 +139,6 @@ export class GameManager {
     return game.winner;
   }
 
-  // Updates the active player's remaining time and reports whether it expired.
   checkTime(gameId) {
     const game = this.games.get(gameId);
     if (!game) return { flagFallen: false, clocks: null, winner: null };
@@ -130,18 +163,26 @@ export class GameManager {
     return { flagFallen: false, clocks: { ...game.clocks }, winner: null };
   }
 
-  // Finds a player's color in a game, or null when they are not a participant.
   getColor(game, socketId) {
     if (game.players.white === socketId) return "white";
     if (game.players.black === socketId) return "black";
     return null;
   }
 
-  // Maps the chess.js position to the public game status values.
   getChessStatus(chess) {
     if (chess.isCheckmate()) return "checkmate";
     if (chess.isStalemate()) return "stalemate";
     if (chess.isDraw()) return "draw";
     return "ongoing";
+  }
+
+  cleanupGame(gameId) {
+    const game = this.games.get(gameId);
+    if (!game) return;
+    for (const color of ["white", "black"]) {
+      const timer = game.reconnect[color].timer;
+      if (timer) clearTimeout(timer);
+      this.userGames.delete(game.accounts[color].userId);
+    }
   }
 }

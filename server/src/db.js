@@ -35,3 +35,18 @@ export async function initDb() {
     )
   `);
 }
+
+// Saves a finished game and updates the win/loss counters of both players.
+export async function recordGameResult({ whiteUserId, blackUserId, winnerUserId, result, pgn }) {
+  await pool.query(
+    `INSERT INTO games (white_id, black_id, winner_id, result, pgn)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [whiteUserId, blackUserId, winnerUserId ?? null, result, pgn ?? null],
+  );
+
+  if (winnerUserId) {
+    const loserUserId = winnerUserId === whiteUserId ? blackUserId : whiteUserId;
+    await pool.query(`UPDATE users SET wins = wins + 1 WHERE id = $1`, [winnerUserId]);
+    await pool.query(`UPDATE users SET losses = losses + 1 WHERE id = $1`, [loserUserId]);
+  }
+}

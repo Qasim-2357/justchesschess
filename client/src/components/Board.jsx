@@ -6,10 +6,10 @@ import { socket } from "../socket";
 export default function Board({ game }) {
   const [chess] = useState(() => new Chess(game.fen));
   const [fen, setFen] = useState(game.fen);
-  const [clocks, setClocks] = useState(() => ({
+  const [clocks, setClocks] = useState(() => game.clocks ?? {
     white: game.timeMs,
     black: game.timeMs,
-  }));
+  });
   const [error, setError] = useState("");
   const authoritativeFen = useRef(game.fen);
 

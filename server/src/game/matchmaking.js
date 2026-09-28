@@ -1,22 +1,35 @@
-// FIFO queue of socket IDs waiting for an opponent.
+// FIFO queue of players waiting for an opponent. Each entry is
+// { socketId, userId, username } so we can avoid matching a player
+// against their own second tab/account.
 export class Queue {
   constructor() {
-    this.players = [];
+    this.entries = [];
   }
 
-  // Adds a socket once, preserving the order in which players joined.
-  addPlayer(socketId) {
-    if (!this.players.includes(socketId)) this.players.push(socketId);
+  // Adds a player once, preserving join order.
+  addPlayer(entry) {
+    if (!this.entries.some((e) => e.socketId === entry.socketId)) {
+      this.entries.push(entry);
+    }
   }
 
-  // Removes a socket from the waiting list if it is present.
+  // Removes a player from the waiting list if present.
   removePlayer(socketId) {
-    this.players = this.players.filter((playerId) => playerId !== socketId);
+    this.entries = this.entries.filter((e) => e.socketId !== socketId);
   }
 
-  // Returns the oldest two waiting socket IDs, or null when fewer than two wait.
+  // Returns the oldest two waiting entries belonging to DIFFERENT accounts,
+  // or null when no valid pair is available yet (e.g. only the same user
+  // waiting in two tabs).
   tryMatch() {
-    if (this.players.length < 2) return null;
-    return [this.players.shift(), this.players.shift()];
+    if (this.entries.length < 2) return null;
+
+    const [first, ...rest] = this.entries;
+    const opponentIndex = rest.findIndex((entry) => entry.userId !== first.userId);
+    if (opponentIndex === -1) return null;
+
+    const opponent = rest[opponentIndex];
+    this.entries = rest.filter((_, i) => i !== opponentIndex);
+    return [first, opponent];
   }
 }
