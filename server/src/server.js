@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import { initDb } from "./db.js";
 import { registerSocketHandlers } from "./socket.js";
 import authRouter from "./routes/auth.js";
+import leaderboardRouter from "./routes/leaderboard.js";
 
 // Builds the app/http server/socket server without starting to listen.
 // Used by both the real entrypoint and by tests.
@@ -21,6 +22,7 @@ export function createServer() {
   });
 
   app.use("/auth", authRouter);
+  app.use("/leaderboard", leaderboardRouter);
 
   const io = new Server(server, { cors: { origin: clientUrl } });
   registerSocketHandlers(io);

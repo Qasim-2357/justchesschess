@@ -3,6 +3,7 @@ import { socket } from "./socket";
 import Board from "./components/Board";
 import Auth from "./components/Auth";
 import ReconnectModal from "./components/ReconnectModal";
+import Leaderboard from "./components/Leaderboard";
 
 const STORAGE_KEY = "justchesschess_auth";
 
@@ -23,6 +24,7 @@ export default function App() {
   const [opponentDeadline, setOpponentDeadline] = useState(null);
   const [opponentSecondsLeft, setOpponentSecondsLeft] = useState(null);
   const [connectionError, setConnectionError] = useState("");
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
@@ -158,10 +160,15 @@ export default function App() {
 
   return (
     <div style={appStyle}>
-      <div style={topBarStyle}>
+            <div style={topBarStyle}>
         <span>{auth.user.username}</span>
+        <button style={smallButtonStyle} onClick={() => setShowLeaderboard(true)}>Leaderboard</button>
         <button style={smallButtonStyle} onClick={handleLogout}>Log out</button>
       </div>
+
+      {showLeaderboard && (
+        <Leaderboard onClose={() => setShowLeaderboard(false)} />
+      )}
 
       {resumePrompt && (
         <ReconnectModal prompt={resumePrompt} onResign={() => setResumePrompt(null)} />
