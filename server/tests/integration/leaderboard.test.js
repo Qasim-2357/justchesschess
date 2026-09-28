@@ -29,25 +29,42 @@ afterAll(async () => {
 });
 
 describe("GET /leaderboard", () => {
-  it("returns users sorted by wins, descending", async () => {
-    const topUser = `test_${randomUUID().slice(0, 8)}`;
-    const midUser = `test_${randomUUID().slice(0, 8)}`;
-    await signup(topUser);
-    await signup(midUser);
+  it("ranks a proven high win-rate player above a small-sample perfect record", async () => {
+    const provenUser = `test_${randomUUID().slice(0, 8)}`; // 8-2, 80%
+    const luckyUser = `test_${randomUUID().slice(0, 8)}`;  // 1-0, 100%, too few games
+    await signup(provenUser);
+    await signup(luckyUser);
 
-    await pool.query("UPDATE users SET wins = 5, losses = 1 WHERE username = $1", [topUser]);
-    await pool.query("UPDATE users SET wins = 2, losses = 3 WHERE username = $1", [midUser]);
+    await pool.query("UPDATE users SET wins = 8, losses = 2 WHERE username = $1", [provenUser]);
+    await pool.query("UPDATE users SET wins = 1, losses = 0 WHERE username = $1", [luckyUser]);
 
     const res = await fetch(`${SERVER_URL}/leaderboard`);
     const data = await res.json();
 
-    const topIndex = data.leaderboard.findIndex((r) => r.username === topUser);
-    const midIndex = data.leaderboard.findIndex((r) => r.username === midUser);
-    expect(topIndex).toBeGreaterThanOrEqual(0);
-    expect(midIndex).toBeGreaterThan(topIndex);
+    const usernames = data.leaderboard.map((r) => r.username);
+    expect(usernames).toContain(provenUser);
+    expect(usernames).not.toContain(luckyUser);
   });
 
-  it("only returns username, wins, and losses — never password_hash", async () => {
+  it("orders qualified players by win rate, not raw win count", async () => {
+    const higherRate = `test_${randomUUID().slice(0, 8)}`; // 5-1, 83%
+    const lowerRate = `test_${randomUUID().slice(0, 8)}`;  // 6-6, 50%
+    await signup(higherRate);
+    await signup(lowerRate);
+
+    await pool.query("UPDATE users SET wins = 5, losses = 1 WHERE username = $1", [higherRate]);
+    await pool.query("UPDATE users SET wins = 6, losses = 6 WHERE username = $1", [lowerRate]);
+
+    const res = await fetch(`${SERVER_URL}/leaderboard`);
+    const data = await res.json();
+
+    const higherIndex = data.leaderboard.findIndex((r) => r.username === higherRate);
+    const lowerIndex = data.leaderboard.findIndex((r) => r.username === lowerRate);
+    expect(higherIndex).toBeGreaterThanOrEqual(0);
+    expect(lowerIndex).toBeGreaterThan(higherIndex);
+  });
+
+  it("only returns username, wins, losses, games, win_rate — never password_hash or id", async () => {
     const res = await fetch(`${SERVER_URL}/leaderboard`);
     const data = await res.json();
     if (data.leaderboard.length > 0) {

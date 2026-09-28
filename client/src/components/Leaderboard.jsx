@@ -3,13 +3,17 @@ import { SERVER_URL } from "../api";
 
 export default function Leaderboard({ onClose }) {
   const [rows, setRows] = useState([]);
+  const [minGames, setMinGames] = useState(5);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetch(`${SERVER_URL}/leaderboard`)
       .then((res) => res.json())
-      .then((data) => setRows(data.leaderboard || []))
+      .then((data) => {
+        setRows(data.leaderboard || []);
+        if (data.minGamesToRank) setMinGames(data.minGamesToRank);
+      })
       .catch(() => setError("Could not load the leaderboard."))
       .finally(() => setLoading(false));
   }, []);
@@ -26,30 +30,37 @@ export default function Leaderboard({ onClose }) {
         {error && <p style={{ color: "#ff8a8a" }}>{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
-          <p style={{ color: "#888" }}>No games played yet.</p>
+          <p style={{ color: "#888" }}>No one has played {minGames}+ games yet.</p>
         )}
 
         {!loading && !error && rows.length > 0 && (
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>#</th>
-                <th style={thStyle}>Player</th>
-                <th style={thStyle}>Wins</th>
-                <th style={thStyle}>Losses</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, i) => (
-                <tr key={row.username}>
-                  <td style={tdStyle}>{i + 1}</td>
-                  <td style={tdStyle}>{row.username}</td>
-                  <td style={tdStyle}>{row.wins}</td>
-                  <td style={tdStyle}>{row.losses}</td>
+          <>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>#</th>
+                  <th style={thStyle}>Player</th>
+                  <th style={thStyle}>Win rate</th>
+                  <th style={thStyle}>W</th>
+                  <th style={thStyle}>L</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={row.username}>
+                    <td style={tdStyle}>{i + 1}</td>
+                    <td style={tdStyle}>{row.username}</td>
+                    <td style={tdStyle}>{Math.round(row.win_rate * 100)}%</td>
+                    <td style={tdStyle}>{row.wins}</td>
+                    <td style={tdStyle}>{row.losses}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ color: "#666", fontSize: 11, marginTop: 10 }}>
+              Ranked players need at least {minGames} games played.
+            </p>
+          </>
         )}
       </div>
     </div>
