@@ -1,10 +1,21 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { pool } from "../db.js";
 
 const router = Router();
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+
+// Limits signup/login attempts per IP to slow down bots and brute-forcing,
+// without being so strict that a real person retyping a password gets stuck.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Please try again later." },
+});
 
 function signToken(user) {
   return jwt.sign(
@@ -15,7 +26,7 @@ function signToken(user) {
 }
 
 // POST /auth/signup { username, password } -> creates a unique account and returns a token.
-router.post("/signup", async (req, res) => {
+router.post("/signup", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
 
   if (typeof username !== "string" || !USERNAME_RE.test(username)) {
@@ -46,7 +57,7 @@ router.post("/signup", async (req, res) => {
 });
 
 // POST /auth/login { username, password } -> returns a token for a valid account.
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
   if (typeof username !== "string" || typeof password !== "string") {
     return res.status(400).json({ error: "Username and password are required" });
