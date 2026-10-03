@@ -47,17 +47,9 @@ export function registerSocketHandlers(io) {
     }
   }
 
-  async function emitGameOver(gameId) {
+   async function emitGameOver(gameId) {
     const game = gameManager.games.get(gameId);
     if (!game) return;
-
-    emitToPlayers(game, "game:over", {
-      gameId,
-      winner: game.winner,
-      status: game.status,
-      fen: game.chess.fen(),
-      clocks: { ...game.clocks },
-    });
 
     const whiteUserId = game.accounts.white.userId;
     const blackUserId = game.accounts.black.userId;
@@ -66,6 +58,8 @@ export function registerSocketHandlers(io) {
       : game.winner === game.players.black ? blackUserId
       : null;
 
+    // Save the result BEFORE telling clients it's final — otherwise a
+    // client (or a test) could check the database before the write lands.
     try {
       await recordGameResult({
         whiteUserId,
@@ -77,6 +71,14 @@ export function registerSocketHandlers(io) {
     } catch (err) {
       console.error("Failed to record game result:", err);
     }
+
+    emitToPlayers(game, "game:over", {
+      gameId,
+      winner: game.winner,
+      status: game.status,
+      fen: game.chess.fen(),
+      clocks: { ...game.clocks },
+    });
 
     gameManager.cleanupGame(gameId);
     gameManager.socketGames.delete(game.players.white);
