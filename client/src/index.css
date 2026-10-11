@@ -1,7 +1,10 @@
 :root {
-  font-family: Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   color: #f5f5f5;
   background: #000;
+  --gold: #d4b24c;
+  --gold-dim: #8a7538;
 }
 
 * {
@@ -20,4 +23,61 @@ main {
   min-height: 100vh;
   place-content: center;
   text-align: center;
+}
+
+/* Shared interactive elements — used across the login screen, the top bar,
+   the leaderboard and the in-game overlays, so every button/input in the
+   app shares one consistent look instead of each component inventing its
+   own flat rectangle. */
+.btn {
+  background: #141414;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--gold-dim);
+  background: #1a1a1a;
+}
+.btn:active:not(:disabled) {
+  background: #0c0c0c;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-primary {
+  border-color: var(--gold-dim);
+  color: #f3e6bf;
+}
+.btn-primary:hover:not(:disabled) {
+  border-color: var(--gold);
+  background: #1f1a0e;
+}
+
+.field {
+  background: #0d0d0d;
+  color: #fff;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  padding: 11px 13px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.field:focus {
+  border-color: var(--gold-dim);
+}
+.field::placeholder {
+  color: #5a5a5a;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

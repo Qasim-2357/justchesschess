@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { socket } from "./socket";
-import Board from "./components/Board";
+import Board from "./components/Board3D";
 import Auth from "./components/Auth";
 import ReconnectModal from "./components/ReconnectModal";
 import Leaderboard from "./components/Leaderboard";
+import AmbientBoard from "./components/AmbientBoard";
 
 const STORAGE_KEY = "justchesschess_auth";
 
@@ -24,7 +25,6 @@ export default function App() {
   const [opponentDeadline, setOpponentDeadline] = useState(null);
   const [opponentSecondsLeft, setOpponentSecondsLeft] = useState(null);
   const [connectionError, setConnectionError] = useState("");
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
@@ -160,73 +160,186 @@ export default function App() {
 
   return (
     <div style={appStyle}>
-            <div style={topBarStyle}>
-        <span>{auth.user.username}</span>
-        <button style={smallButtonStyle} onClick={() => setShowLeaderboard(true)}>Leaderboard</button>
-        <button style={smallButtonStyle} onClick={handleLogout}>Log out</button>
-      </div>
-
-      {showLeaderboard && (
-        <Leaderboard onClose={() => setShowLeaderboard(false)} />
-      )}
+      {/* Only behind the lobby screens — never mounted alongside the real,
+          interactive Board3D during "playing", so there's only ever one
+          WebGL canvas on screen at a time. */}
+      {screen !== "playing" && <AmbientBoard />}
 
       {resumePrompt && (
         <ReconnectModal prompt={resumePrompt} onResign={() => setResumePrompt(null)} />
       )}
 
-      {screen === "idle" && (
-        <button style={buttonStyle} onClick={joinQueue}>
-          Play
-        </button>
-      )}
+      {/* Left HUD panel: the leaderboard is always on screen — no button to
+          click to open it — and pins the signed-in player's own standing
+          even when they're off the visible list, the way a mobile game's
+          side panel does. */}
+      <div style={leftPanelStyle}>
+        <Leaderboard currentUsername={auth.user.username} />
+      </div>
 
-      {screen === "queued" && (
-        <>
-          <p>Waiting for an opponent...</p>
-          <button style={buttonStyle} onClick={leaveQueue}>
-            Cancel
-          </button>
-        </>
-      )}
-
+      {/* Center stays empty chrome so the board (AmbientBoard or the real
+          interactive Board3D) is the only thing ever drawn there — nothing
+          competes with it for clicks or attention. */}
       {screen === "playing" && game && (
-        <>
-          {opponentSecondsLeft !== null && (
-            <p>Opponent disconnected. You'll be awarded the win in {opponentSecondsLeft}s if they don't return.</p>
-          )}
+        <div style={centerStageStyle}>
           <Board game={game} />
-        </>
+        </div>
       )}
 
-      {screen === "over" && (
-        <>
-          <p>{getGameOverMessage()}</p>
-          <button style={buttonStyle} onClick={joinQueue}>
-            Play again
-          </button>
-        </>
-      )}
+      {/* Right HUD panel: identity + whatever action fits the current
+          screen (Play / queued status / post-game) + Log out. Positioned,
+          z-indexed, and off to the side — never sitting on top of the
+          board the way the old centered Play button used to. */}
+      <div style={rightPanelStyle}>
+        <div style={identityCardStyle}>
+          <span style={usernameStyle}>{auth.user.username}</span>
+          <button className="btn" style={smallButtonStyle} onClick={handleLogout}>Log out</button>
+        </div>
+
+        <div style={actionCardStyle}>
+          {screen === "idle" && (
+            <button className="btn btn-primary" style={playButtonStyle} onClick={joinQueue}>
+              Play
+            </button>
+          )}
+
+          {screen === "queued" && (
+            <div style={centeredMessageStyle}>
+              <div style={spinnerStyle} />
+              <p style={{ color: "#aaa", margin: 0 }}>Waiting for an opponent…</p>
+              <button className="btn" style={buttonStyle} onClick={leaveQueue}>
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {screen === "playing" && (
+            <div style={centeredMessageStyle}>
+              <p style={{ color: "#aaa", margin: 0, fontSize: 13 }}>Game in progress</p>
+              {opponentSecondsLeft !== null && (
+                <p style={disconnectBannerStyle}>
+                  Opponent disconnected. You'll be awarded the win in {opponentSecondsLeft}s if they don't return.
+                </p>
+              )}
+            </div>
+          )}
+
+          {screen === "over" && (
+            <div style={centeredMessageStyle}>
+              <p style={gameOverTextStyle}>{getGameOverMessage()}</p>
+              <button className="btn btn-primary" style={buttonStyle} onClick={joinQueue}>
+                Play again
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 const appStyle = {
-  minHeight: "100vh", padding: 20, background: "#000", color: "#fff",
-  display: "flex", flexDirection: "column", alignItems: "center",
-  justifyContent: "center", gap: 16, position: "relative",
+  minHeight: "100vh", background: "#000", color: "#fff", position: "relative",
+  overflow: "hidden",
 };
 
-const topBarStyle = {
-  position: "absolute", top: 16, right: 20, display: "flex",
-  alignItems: "center", gap: 12, fontSize: 14, color: "#aaa",
+const PANEL_WIDTH = 230;
+
+const leftPanelStyle = {
+  position: "fixed",
+  top: 20,
+  bottom: 20,
+  left: 20,
+  width: PANEL_WIDTH,
+  zIndex: 2,
+};
+
+const rightPanelStyle = {
+  position: "fixed",
+  top: 20,
+  right: 20,
+  width: PANEL_WIDTH,
+  zIndex: 2,
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const centerStageStyle = {
+  position: "relative",
+  zIndex: 1,
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const cardBaseStyle = {
+  background: "radial-gradient(ellipse at top, #121212f0 0%, #090909f0 70%)",
+  border: "1px solid #262016",
+  borderRadius: 10,
+  padding: "14px 16px",
+  boxShadow: "0 0 40px rgba(0,0,0,0.6)",
+  backdropFilter: "blur(2px)",
+};
+
+const identityCardStyle = {
+  ...cardBaseStyle,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+};
+
+const actionCardStyle = {
+  ...cardBaseStyle,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 90,
+};
+
+const usernameStyle = {
+  color: "#d4b24c",
+  letterSpacing: 0.3,
+  fontSize: 14,
 };
 
 const smallButtonStyle = {
-  background: "#111", color: "#fff", border: "1px solid #333",
-  borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer",
+  padding: "6px 14px", fontSize: 12,
 };
 
 const buttonStyle = {
-  background: "#111", color: "#fff", border: "1px solid #333",
-  borderRadius: 6, padding: "10px 24px", fontSize: 16, cursor: "pointer",
+  padding: "11px 26px", fontSize: 15,
+};
+
+const playButtonStyle = {
+  padding: "14px 44px",
+  fontSize: 17,
+  letterSpacing: 1,
+};
+
+const centeredMessageStyle = {
+  display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+};
+
+const gameOverTextStyle = {
+  fontSize: 18,
+  color: "#eee",
+  margin: 0,
+};
+
+const disconnectBannerStyle = {
+  color: "#f3c969",
+  fontSize: 13,
+  textAlign: "center",
+};
+
+const spinnerStyle = {
+  width: 22,
+  height: 22,
+  border: "2px solid #2a2a2a",
+  borderTopColor: "#d4b24c",
+  borderRadius: "50%",
+  animation: "spin 0.8s linear infinite",
 };
