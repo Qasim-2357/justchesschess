@@ -2,8 +2,52 @@ import pg from "pg";
 
 const { Pool } = pg;
 
+export function getDatabaseConfig({ requireEnv = true } = {}) {
+  const connectionString = (process.env.DATABASE_URL || "").trim();
+
+  if (!connectionString) {
+    if (requireEnv) {
+      throw new Error(
+        "DATABASE_URL is required. Configure it before starting the server.",
+      );
+    }
+
+    return {
+      connectionString: "postgresql://localhost:5432/justchesschess",
+      ssl: false,
+    };
+  }
+
+  let databaseUrl;
+
+  try {
+    databaseUrl = new URL(connectionString);
+  } catch {
+    throw new Error("DATABASE_URL must be a valid PostgreSQL URL");
+  }
+
+  const isPostgresUrl =
+    databaseUrl.protocol === "postgres:" ||
+    databaseUrl.protocol === "postgresql:";
+
+  if (!isPostgresUrl) {
+    throw new Error("DATABASE_URL must use postgres:// or postgresql://");
+  }
+
+  const isLocalDb =
+    databaseUrl.hostname === "localhost" ||
+    databaseUrl.hostname === "127.0.0.1";
+
+  return {
+    connectionString,
+    ssl: isLocalDb ? false : { rejectUnauthorized: true },
+  };
+}
+
 // Shared PostgreSQL connection pool configured from the server environment.
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Local PostgreSQL has no TLS listener, so SSL stays off there.
+// Remote PostgreSQL connections require certificate validation.
+export const pool = new Pool(getDatabaseConfig());
 
 // Creates the user and game tables, plus the case-insensitive username index.
 export async function initDb() {
@@ -37,7 +81,13 @@ export async function initDb() {
 }
 
 // Saves a finished game and updates the win/loss counters of both players.
-export async function recordGameResult({ whiteUserId, blackUserId, winnerUserId, result, pgn }) {
+export async function recordGameResult({
+  whiteUserId,
+  blackUserId,
+  winnerUserId,
+  result,
+  pgn,
+}) {
   await pool.query(
     `INSERT INTO games (white_id, black_id, winner_id, result, pgn)
      VALUES ($1, $2, $3, $4, $5)`,
@@ -45,11 +95,19 @@ export async function recordGameResult({ whiteUserId, blackUserId, winnerUserId,
   );
 
   if (winnerUserId) {
-    const loserUserId = winnerUserId === whiteUserId ? blackUserId : whiteUserId;
-    await pool.query(`UPDATE users SET wins = wins + 1 WHERE id = $1`, [winnerUserId]);
-    await pool.query(`UPDATE users SET losses = losses + 1 WHERE id = $1`, [loserUserId]);
+    const loserUserId =
+      winnerUserId === whiteUserId ? blackUserId : whiteUserId;
+
+    await pool.query("UPDATE users SET wins = wins + 1 WHERE id = $1", [
+      winnerUserId,
+    ]);
+
+    await pool.query("UPDATE users SET losses = losses + 1 WHERE id = $1", [
+      loserUserId,
+    ]);
   }
 }
+
 // Returns a user's win rate (0 to 1). New players with no finished games
 // get a neutral 0.5, so they're not treated as unusually strong or weak.
 export async function getWinRate(userId) {
@@ -57,8 +115,12 @@ export async function getWinRate(userId) {
     "SELECT wins, losses FROM users WHERE id = $1",
     [userId],
   );
+
   const user = result.rows[0];
+
   if (!user) return 0.5;
+
   const total = user.wins + user.losses;
+
   return total === 0 ? 0.5 : user.wins / total;
 }

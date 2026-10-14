@@ -5,6 +5,7 @@ import Auth from "./components/Auth";
 import ReconnectModal from "./components/ReconnectModal";
 import Leaderboard from "./components/Leaderboard";
 import AmbientBoard from "./components/AmbientBoard";
+import ProfileModal from "./components/ProfileModal";
 
 const STORAGE_KEY = "justchesschess_auth";
 
@@ -26,6 +27,7 @@ export default function App() {
   const [opponentSecondsLeft, setOpponentSecondsLeft] = useState(null);
   const [connectionError, setConnectionError] = useState("");
   const [leaderboardRefresh, setLeaderboardRefresh] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
@@ -35,6 +37,7 @@ export default function App() {
     setOverInfo(null);
     setResumePrompt(null);
     setOpponentDeadline(null);
+    setProfileOpen(false);
   }
 
   useEffect(() => {
@@ -171,6 +174,14 @@ export default function App() {
         <ReconnectModal prompt={resumePrompt} onResign={() => setResumePrompt(null)} />
       )}
 
+      {profileOpen && (
+        <ProfileModal
+          username={auth.user.username}
+          refreshSignal={leaderboardRefresh}
+          onClose={() => setProfileOpen(false)}
+        />
+      )}
+
       {/* Left HUD panel: the leaderboard is always on screen — no button to
           click to open it — and pins the signed-in player's own standing
           even when they're off the visible list, the way a mobile game's
@@ -193,9 +204,30 @@ export default function App() {
           z-indexed, and off to the side — never sitting on top of the
           board the way the old centered Play button used to. */}
       <div style={rightPanelStyle}>
-        <div style={identityCardStyle}>
+        <div
+          style={identityCardStyle}
+          onClick={() => setProfileOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setProfileOpen(true);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label={`View ${auth.user.username} profile`}
+        >
           <span style={usernameStyle}>{auth.user.username}</span>
-          <button className="btn" style={smallButtonStyle} onClick={handleLogout}>Log out</button>
+          <button
+            className="btn"
+            style={smallButtonStyle}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleLogout();
+            }}
+          >
+            Log out
+          </button>
         </div>
 
         <div style={actionCardStyle}>
@@ -291,6 +323,7 @@ const identityCardStyle = {
   alignItems: "center",
   justifyContent: "space-between",
   gap: 10,
+  cursor: "pointer",
 };
 
 const actionCardStyle = {
