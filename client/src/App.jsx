@@ -25,6 +25,7 @@ export default function App() {
   const [opponentDeadline, setOpponentDeadline] = useState(null);
   const [opponentSecondsLeft, setOpponentSecondsLeft] = useState(null);
   const [connectionError, setConnectionError] = useState("");
+  const [leaderboardRefresh, setLeaderboardRefresh] = useState(0);
 
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
@@ -62,6 +63,7 @@ export default function App() {
       setResumePrompt(null);
       setOpponentDeadline(null);
       setScreen("over");
+      setLeaderboardRefresh((n) => n + 1);
     }
 
     function onOpponentGone(data) {
@@ -174,7 +176,7 @@ export default function App() {
           even when they're off the visible list, the way a mobile game's
           side panel does. */}
       <div style={leftPanelStyle}>
-        <Leaderboard currentUsername={auth.user.username} />
+        <Leaderboard currentUsername={auth.user.username} refreshSignal={leaderboardRefresh} />
       </div>
 
       {/* Center stays empty chrome so the board (AmbientBoard or the real

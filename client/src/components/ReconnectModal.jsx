@@ -24,16 +24,21 @@ export default function ReconnectModal({ prompt, onResign }) {
   return (
     <div style={overlayStyle}>
       <div style={boxStyle}>
-        <p>You have an unfinished game.</p>
-        <p style={{ fontSize: 28, margin: "8px 0" }}>{secondsLeft}s</p>
-        <p style={{ color: "#aaa", fontSize: 13 }}>
+        <p style={{ margin: 0, color: "#eee" }}>You have an unfinished game.</p>
+        <p style={secondsStyle}>{secondsLeft}s</p>
+        <p style={{ color: "#888", fontSize: 13, margin: 0 }}>
           Rejoin now, or it counts as a resignation.
         </p>
-        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-          <button style={buttonStyle} onClick={handleRejoin} disabled={secondsLeft === 0}>
+        <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
+          <button
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            onClick={handleRejoin}
+            disabled={secondsLeft === 0}
+          >
             Rejoin
           </button>
-          <button style={buttonStyle} onClick={handleResign}>
+          <button className="btn" style={{ flex: 1 }} onClick={handleResign}>
             Resign
           </button>
         </div>
@@ -47,12 +52,24 @@ const overlayStyle = {
   display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10,
 };
 
+// Matches the gold-on-black card language used across the HUD panels and
+// the auth screen (radial-gradient card, #262016 border, gold accents) —
+// this used to be a flat #111 box with no border tint, the one spot in the
+// app that still looked like the pre-redesign UI.
 const boxStyle = {
-  background: "#111", border: "1px solid #333", borderRadius: 8,
-  padding: 24, textAlign: "center", color: "#fff", width: 260,
+  background: "radial-gradient(ellipse at top, #121212f0 0%, #090909f0 70%)",
+  border: "1px solid #262016",
+  borderRadius: 10,
+  boxShadow: "0 0 40px rgba(0,0,0,0.6)",
+  backdropFilter: "blur(2px)",
+  padding: "26px 28px",
+  textAlign: "center",
+  width: 260,
 };
 
-const buttonStyle = {
-  flex: 1, background: "#222", color: "#fff", border: "1px solid #333",
-  borderRadius: 6, padding: "8px 0", cursor: "pointer",
+const secondsStyle = {
+  fontSize: 32,
+  margin: "10px 0",
+  color: "#d4b24c",
+  fontVariantNumeric: "tabular-nums",
 };

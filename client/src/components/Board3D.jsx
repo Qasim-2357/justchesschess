@@ -462,7 +462,11 @@ export default function Board3D({ game }) {
               <p style={{ margin: "0 0 10px", fontSize: 13, color: "#ccc" }}>Promote to:</p>
               <div style={{ display: "flex", gap: 8 }}>
                 {PROMOTION_PIECES.map((piece) => (
-                  <button key={piece.code} style={pieceButtonStyle} onClick={() => choosePromotion(piece.code)}>
+                  <button
+                    key={piece.code}
+                    className="btn btn-primary"
+                    onClick={() => choosePromotion(piece.code)}
+                  >
                     {piece.label}
                   </button>
                 ))}
@@ -476,7 +480,7 @@ export default function Board3D({ game }) {
       {error && <p style={{ color: "#ff8a8a" }}>{error}</p>}
       <p style={keyboardHintStyle}>Arrow keys to move the cursor (cyan ring) · Enter to select/play · Esc to cancel</p>
 
-      <button style={buttonStyle} onClick={() => socket.emit("game:resign", { gameId: game.gameId })}>
+      <button className="btn" onClick={() => socket.emit("game:resign", { gameId: game.gameId })}>
         Resign
       </button>
     </div>
@@ -494,6 +498,12 @@ const cameraButtonRowStyle = { position: "absolute", top: 8, right: 8, display: 
 const keyboardHintStyle = { fontSize: 12, color: "#777", margin: 0 };
 const cameraButtonStyle = { width: 28, height: 28, background: "rgba(0,0,0,0.6)", color: "#fff", border: "1px solid #333", borderRadius: 4, cursor: "pointer", fontSize: 12 };
 const overlayStyle = { position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 5 };
-const pickerBoxStyle = { background: "#111", border: "1px solid #333", borderRadius: 8, padding: 16, textAlign: "center" };
-const pieceButtonStyle = { background: "#222", color: "#fff", border: "1px solid #333", borderRadius: 6, padding: "8px 12px", cursor: "pointer", fontSize: 13 };
-const buttonStyle = { background: "#111", color: "#fff", border: "1px solid #333", borderRadius: 6, padding: "7px 18px", cursor: "pointer" };
+const pickerBoxStyle = {
+  background: "radial-gradient(ellipse at top, #121212f0 0%, #090909f0 70%)",
+  border: "1px solid #262016",
+  borderRadius: 10,
+  boxShadow: "0 0 40px rgba(0,0,0,0.6)",
+  backdropFilter: "blur(2px)",
+  padding: "18px 20px",
+  textAlign: "center",
+};

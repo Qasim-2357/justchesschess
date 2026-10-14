@@ -7,7 +7,7 @@ import { SERVER_URL } from "../api";
 // their row is pinned at the bottom below a divider instead, the way
 // Brawl Stars / Contest of Champions always show "you are #N" even when
 // you're nowhere near the top.
-export default function Leaderboard({ currentUsername }) {
+export default function Leaderboard({ currentUsername, refreshSignal }) {
   const [rows, setRows] = useState([]);
   const [me, setMe] = useState(null);
   const [minGames, setMinGames] = useState(5);
@@ -41,7 +41,7 @@ export default function Leaderboard({ currentUsername }) {
     return () => {
       cancelled = true;
     };
-  }, [currentUsername]);
+  }, [currentUsername, refreshSignal]);
 
   const meInList = rows.some((row) => row.username === currentUsername);
   const showPinnedMe = !loading && !error && currentUsername && me && !meInList;
