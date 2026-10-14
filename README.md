@@ -4,7 +4,7 @@
 
 JustChessChess is a browser-based chess project with a 3D chessboard, a dark visual style, and a player leaderboard. The project uses a React frontend and a Node.js backend, with Socket.IO for real-time communication and PostgreSQL for persistent data.
 
-> **Live demo:** Add your deployed website URL here when deployment is complete.
+https://justchesschess.vercel.app
 
 ## Preview
 
