@@ -28,6 +28,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState("");
   const [leaderboardRefresh, setLeaderboardRefresh] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
@@ -164,7 +165,7 @@ export default function App() {
   }
 
   return (
-    <div style={appStyle}>
+    <div className="app-shell" style={appStyle}>
       {/* Only behind the lobby screens — never mounted alongside the real,
           interactive Board3D during "playing", so there's only ever one
           WebGL canvas on screen at a time. */}
@@ -186,15 +187,32 @@ export default function App() {
           click to open it — and pins the signed-in player's own standing
           even when they're off the visible list, the way a mobile game's
           side panel does. */}
-      <div style={leftPanelStyle}>
-        <Leaderboard currentUsername={auth.user.username} refreshSignal={leaderboardRefresh} />
+      <div className="leaderboard-region" style={leftPanelStyle}>
+        <button
+          className="btn leaderboard-toggle"
+          onClick={() => setLeaderboardOpen((open) => !open)}
+          aria-expanded={leaderboardOpen}
+          aria-controls="leaderboard-panel"
+        >
+          {leaderboardOpen ? "Close leaderboard" : "Leaderboard"}
+        </button>
+        <div id="leaderboard-panel" className={leaderboardOpen ? "leaderboard-drawer is-open" : "leaderboard-drawer"}>
+          <button
+            className="btn leaderboard-close"
+            onClick={() => setLeaderboardOpen(false)}
+            aria-label="Close leaderboard"
+          >
+            ×
+          </button>
+          <Leaderboard currentUsername={auth.user.username} refreshSignal={leaderboardRefresh} />
+        </div>
       </div>
 
       {/* Center stays empty chrome so the board (AmbientBoard or the real
           interactive Board3D) is the only thing ever drawn there — nothing
           competes with it for clicks or attention. */}
       {screen === "playing" && game && (
-        <div style={centerStageStyle}>
+        <div className="center-stage" style={centerStageStyle}>
           <Board game={game} />
         </div>
       )}
@@ -203,21 +221,15 @@ export default function App() {
           screen (Play / queued status / post-game) + Log out. Positioned,
           z-indexed, and off to the side — never sitting on top of the
           board the way the old centered Play button used to. */}
-      <div style={rightPanelStyle}>
-        <div
-          style={identityCardStyle}
-          onClick={() => setProfileOpen(true)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              setProfileOpen(true);
-            }
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label={`View ${auth.user.username} profile`}
-        >
-          <span style={usernameStyle}>{auth.user.username}</span>
+      <div className="right-panel" style={rightPanelStyle}>
+        <div className="identity-card" style={identityCardStyle}>
+          <button
+            className="profile-trigger"
+            onClick={() => setProfileOpen(true)}
+            aria-label={`View ${auth.user.username} profile`}
+          >
+            <span style={usernameStyle}>{auth.user.username}</span>
+          </button>
           <button
             className="btn"
             style={smallButtonStyle}
@@ -230,7 +242,7 @@ export default function App() {
           </button>
         </div>
 
-        <div style={actionCardStyle}>
+        <div className="action-card" style={actionCardStyle}>
           {screen === "idle" && (
             <button className="btn btn-primary" style={playButtonStyle} onClick={joinQueue}>
               Play

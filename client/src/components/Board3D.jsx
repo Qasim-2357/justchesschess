@@ -333,7 +333,7 @@ export default function Board3D({ game }) {
     <div style={containerStyle}>
       <div style={clockStyle}>Opponent ({topColor}): {formatClock(clocks[topColor])}</div>
 
-      <div style={canvasWrapStyle}>
+      <div className="board-canvas-wrap" style={canvasWrapStyle}>
         <Canvas shadows camera={{ position: CAMERA_PRESETS[0].position, fov: 50 }}>
           <color attach="background" args={["#000000"]} />
           <fog attach="fog" args={["#000000", 18, 42]} />
@@ -487,7 +487,7 @@ export default function Board3D({ game }) {
   );
 }
 
-const containerStyle = { display: "flex", flexDirection: "column", alignItems: "center", gap: 10 };
+const containerStyle = { display: "flex", flexDirection: "column", alignItems: "center", gap: 10, width: "100%" };
 const canvasWrapStyle = { position: "relative", width: "min(96vw, 900px)", height: "min(78vh, 760px)", background: "#000" };
 const vignetteStyle = {
   position: "absolute", inset: 0, pointerEvents: "none",
