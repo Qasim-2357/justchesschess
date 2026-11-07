@@ -1,13 +1,14 @@
-import { useMemo, useRef } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Lightformer, ContactShadows } from "@react-three/drei";
+import { Environment, Lightformer, ContactShadows, RoundedBox } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import {
   squareToCoords,
   createWoodTexture,
   createRadialGradientTexture,
   PieceVisual,
+  BoardTrim,
   STARTING_PIECES,
 } from "./boardVisuals";
 
@@ -15,13 +16,11 @@ const FRAME_HEIGHT = 0.5;
 const FRAME_SIZE = 9.6;
 
 /**
- * The same board, lighting and piece geometry as the real game board, but
+ * The same board, lighting and piece models as the real game board, but
  * static (starting position, no clocks, no sockets) and non-interactive
  * (every mesh has raycast disabled) — reused as a decorative background
- * behind the login screen and the lobby instead of a stock photo. This
- * keeps the "no external assets, no network fetch" rule that the real
- * board already follows, and it's guaranteed to look consistent since both
- * boards share the exact same texture/geometry code (see boardVisuals.js).
+ * behind the login screen and the lobby. Both boards share the exact same
+ * texture/model code (see boardVisuals.jsx), so they always look consistent.
  */
 export default function AmbientBoard() {
   const lightWoodMap = useMemo(() => createWoodTexture("#d8c6a0", "#a8896a"), []);
@@ -83,10 +82,18 @@ export default function AmbientBoard() {
 
           <ContactShadows position={[0, -0.53, 0]} opacity={0.6} scale={14} blur={2} far={3} resolution={256} />
 
-          <mesh position={[0, -FRAME_HEIGHT / 2, 0]} receiveShadow castShadow>
-            <boxGeometry args={[FRAME_SIZE, FRAME_HEIGHT, FRAME_SIZE]} />
+          <RoundedBox
+            args={[FRAME_SIZE, FRAME_HEIGHT, FRAME_SIZE]}
+            radius={0.08}
+            smoothness={4}
+            position={[0, -FRAME_HEIGHT / 2, 0]}
+            receiveShadow
+            castShadow
+          >
             <meshStandardMaterial map={frameWoodMap} roughness={0.4} metalness={0.15} />
-          </mesh>
+          </RoundedBox>
+
+          <BoardTrim />
 
           {squares.map(({ name, isDark, coords }) => (
             <mesh key={name} position={coords} rotation={[-Math.PI / 2, 0, 0]} receiveShadow raycast={() => null}>
@@ -95,9 +102,11 @@ export default function AmbientBoard() {
             </mesh>
           ))}
 
-          {pieces.map((p) => (
-            <PieceVisual key={p.square} type={p.type} color={p.color} position={p.coords} />
-          ))}
+          <Suspense fallback={null}>
+            {pieces.map((p) => (
+              <PieceVisual key={p.square} type={p.type} color={p.color} position={p.coords} />
+            ))}
+          </Suspense>
         </Turntable>
 
         <EffectComposer multisampling={0}>
@@ -111,8 +120,7 @@ export default function AmbientBoard() {
 }
 
 // Separated from the default export so the rotating group has a stable
-// identity across re-renders (useMemo'd textures/pieces above would
-// otherwise remount it every render if it were declared inline).
+// identity across re-renders.
 function Turntable({ children }) {
   const ref = useRef(null);
   useFrame(({ clock }) => {

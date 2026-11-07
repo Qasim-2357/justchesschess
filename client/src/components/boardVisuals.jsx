@@ -1,11 +1,20 @@
 // Shared, render-only pieces of the 3D board — procedural textures, square
-// math, and piece geometry — used by both the real interactive Board3D and
-// the decorative AmbientBoard behind the login/lobby screens. Keeping this
-// in one place means the two boards can never visually drift apart, and a
-// fix made once (like the z-fighting nudge below) applies to both.
+// math, and the chess piece models — used by both the real interactive
+// Board3D and the decorative AmbientBoard behind the login/lobby screens.
+// Keeping this in one place means the two boards can never visually drift
+// apart.
+//
+// The pieces are a real modelled Staunton set (public/models/pieces.glb,
+// made in Blender, CC BY 3.0 — see the credits in README.md). One mesh per
+// piece type is loaded once and shared by every piece on the board; white and
+// black differ only by material colour.
+import { useMemo } from "react";
 import * as THREE from "three";
+import { useGLTF } from "@react-three/drei";
 
-export const PIECE_COLOR = { w: "#e8e4da", b: "#161616" };
+export const PIECE_COLOR = { w: "#e8e4da", b: "#1a1816" };
+
+export const PIECES_URL = `${import.meta.env.BASE_URL}models/pieces.glb`;
 
 export function squareToFileRank(square) {
   return { file: square.charCodeAt(0) - 97, rank: parseInt(square[1], 10) - 1 };
@@ -67,169 +76,71 @@ export function createRadialGradientTexture(inner = "rgba(255,255,255,0.9)", out
   return new THREE.CanvasTexture(canvas);
 }
 
-// A turned-wood silhouette (wide foot, narrow waist, flared collar, tapered
-// to a point), revolved around the Y axis with THREE.LatheGeometry — shared
-// by every piece type so they read as one matching set.
-// Height fractions are normalized so the last point (the taper's point)
-// lands at exactly 1.0 — the profile used to close at 0.82, leaving every
-// topper (placed assuming the body reached its full declared height)
-// floating above the real apex with a visible gap. Fine print on a sphere
-// or cone topper, but a glaring floating gap under the rook's flat
-// crenellations and a disconnected head on the knight.
-const BODY_PROFILE = [
-  [0.95, 0.0], [0.95, 0.0366], [0.74, 0.122], [0.86, 0.1951], [0.64, 0.2561],
-  [0.42, 0.6707], [0.5, 0.8293], [0.58, 0.9024], [0.4, 0.9512], [0.0, 1.0],
-];
+// --- The modelled pieces ---
 
-const bodyGeometryCache = new Map();
-export function getBodyGeometry(height, baseRadius) {
-  const key = `${height}:${baseRadius}`;
-  let geo = bodyGeometryCache.get(key);
-  if (!geo) {
-    const points = BODY_PROFILE.map(([rf, hf]) => new THREE.Vector2(rf * baseRadius, hf * height));
-    geo = new THREE.LatheGeometry(points, 24);
-    bodyGeometryCache.set(key, geo);
-  }
-  return geo;
-}
+// glTF node name for each chess.js piece type.
+const NODE_NAME = { p: "pawn", r: "rook", n: "knight", b: "bishop", q: "queen", k: "king" };
 
-// A real horse-head silhouette (poll, ear, a concave forehead dip, a
-// convex nose bridge, a pointed muzzle, and the signature concave "chin
-// notch" every carved Staunton knight has) extruded into a thin solid —
-// not a pile of stacked primitives. Drawn directly in the plane the main
-// board cameras face (XY, extruded along Z), so it reads as a profile
-// silhouette without any extra rotation trick.
-const KNIGHT_HEAD_PROFILE = [
-  [-0.06, 0.0], [-0.1, 0.1], [-0.11, 0.2], [-0.07, 0.28], [-0.02, 0.33],
-  [0.0, 0.36], [0.015, 0.49], [0.038, 0.37], [0.07, 0.3], [0.1, 0.26],
-  [0.15, 0.25], [0.19, 0.22], [0.22, 0.16], [0.225, 0.11], [0.15, 0.115],
-  [0.12, 0.08], [0.1, 0.03], [0.04, -0.02], [-0.06, 0.0],
-];
+// The model is authored at 1 unit per square, which makes the pieces
+// slightly chunky next to the board's squares; this brings them to
+// tournament proportions (king ≈ 1.7 squares tall, pawn ≈ 0.85).
+const PIECE_SCALE = 0.8;
 
-let knightHeadGeometry = null;
-function getKnightHeadGeometry() {
-  if (knightHeadGeometry) return knightHeadGeometry;
-  const shape = new THREE.Shape();
-  KNIGHT_HEAD_PROFILE.forEach(([x, y], i) => {
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  });
-  const depth = 0.16;
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth,
-    bevelEnabled: true,
-    bevelThickness: 0.012,
-    bevelSize: 0.012,
-    bevelSegments: 2,
-  });
-  geo.translate(0, 0, -depth / 2);
-  knightHeadGeometry = geo;
-  return geo;
-}
-
-export const BODY_DIMS = {
-  p: { height: 0.34, radius: 0.26 },
-  r: { height: 0.4, radius: 0.32 },
-  n: { height: 0.32, radius: 0.3 },
-  b: { height: 0.5, radius: 0.28 },
-  q: { height: 0.58, radius: 0.3 },
-  k: { height: 0.58, radius: 0.3 },
-};
+// The knight is modelled facing -Z (toward the opponent, from white's seat).
+// Turned a quarter-turn it shows its profile to the default camera, which
+// reads far better than a head-on view; white's knights face one way and
+// black's the other so each side looks toward the centre of the board.
+const KNIGHT_YAW = { w: -Math.PI / 4, b: Math.PI - Math.PI / 4 };
 
 // Click-target size per piece type — used only by the interactive board,
-// but kept next to BODY_DIMS since the two are tuned together.
+// but kept here next to the model scale since the two are tuned together.
 export const PIECE_HIT_SIZE = {
-  p: { r: 0.24, h: 0.55 },
-  r: { r: 0.33, h: 0.5 },
-  n: { r: 0.3, h: 0.65 },
-  b: { r: 0.3, h: 0.75 },
-  q: { r: 0.34, h: 0.88 },
-  k: { r: 0.34, h: 0.88 },
+  p: { r: 0.24, h: 0.8 },
+  r: { r: 0.3, h: 1.0 },
+  n: { r: 0.3, h: 1.05 },
+  b: { r: 0.28, h: 1.2 },
+  q: { r: 0.32, h: 1.45 },
+  k: { r: 0.32, h: 1.75 },
 };
 
-// Pure visual piece — body + topper, no click handling. The interactive
-// board wraps this with its own invisible hitbox; the decorative ambient
-// board renders it as-is.
-export function PieceVisual({ type, color, position }) {
-  const fill = PIECE_COLOR[color];
-  const matProps = { color: fill, metalness: 0.25, roughness: 0.35 };
-  const visualProps = { castShadow: true, receiveShadow: true, raycast: () => null };
-  const dims = BODY_DIMS[type] ?? { height: 0.4, radius: 0.28 };
+// Pure visual piece — no click handling. The interactive board wraps this
+// with its own invisible hitbox and animation; the decorative ambient board
+// renders it as-is.
+export function PieceVisual({ type, color, position, rotationY = 0 }) {
+  const { nodes } = useGLTF(PIECES_URL);
+  const geometry = nodes[NODE_NAME[type]]?.geometry;
 
-  let topper;
-  switch (type) {
-    case "p":
-      topper = <mesh position={[0, dims.height + 0.11, 0]} {...visualProps}><sphereGeometry args={[0.14, 16, 16]} /><meshStandardMaterial {...matProps} /></mesh>;
-      break;
-    case "r": {
-      // A flat parapet cap sits directly on the body's apex point (closing
-      // the gap that used to leave the merlons floating), and the four
-      // corner merlons sit directly on the cap — nothing disconnected.
-      const capThickness = 0.06;
-      const capY = dims.height + capThickness / 2;
-      const capTopY = dims.height + capThickness;
-      topper = (
-        <>
-          <mesh position={[0, capY, 0]} {...visualProps}>
-            <cylinderGeometry args={[dims.radius * 0.8, dims.radius * 0.72, capThickness, 20]} />
-            <meshStandardMaterial {...matProps} />
-          </mesh>
-          {[[-0.17, -0.17], [0.17, -0.17], [-0.17, 0.17], [0.17, 0.17]].map(([dx, dz], i) => (
-            <mesh key={i} position={[dx, capTopY + 0.055, dz]} {...visualProps}><boxGeometry args={[0.11, 0.11, 0.11]} /><meshStandardMaterial {...matProps} /></mesh>
-          ))}
-        </>
-      );
-      break;
-    }
-    case "n": {
-      // A real horse-head silhouette (see KNIGHT_HEAD_PROFILE above),
-      // extruded into a thin solid and sunk down into the body's apex —
-      // not stacked spheres/cones, which read as a round blob with ear
-      // nubs no matter how they were arranged. The profile is drawn in
-      // the plane the main board cameras already face, so it reads as a
-      // horse in profile from the actual in-game camera angles.
-      topper = (
-        <mesh position={[0, dims.height - 0.04, 0]} geometry={getKnightHeadGeometry()} {...visualProps}>
-          <meshStandardMaterial {...matProps} />
-        </mesh>
-      );
-      break;
-    }
-    case "b":
-      topper = (
-        <>
-          <mesh position={[0, dims.height + 0.17, 0]} {...visualProps}><coneGeometry args={[0.15, 0.34, 16]} /><meshStandardMaterial {...matProps} /></mesh>
-          <mesh position={[0, dims.height + 0.4, 0]} {...visualProps}><sphereGeometry args={[0.055, 12, 12]} /><meshStandardMaterial {...matProps} /></mesh>
-        </>
-      );
-      break;
-    case "q":
-      topper = (
-        <>
-          <mesh position={[0, dims.height + 0.14, 0]} {...visualProps}><sphereGeometry args={[0.16, 18, 18]} /><meshStandardMaterial {...matProps} /></mesh>
-          <mesh position={[0, dims.height + 0.32, 0]} {...visualProps}><coneGeometry args={[0.05, 0.12, 10]} /><meshStandardMaterial {...matProps} /></mesh>
-        </>
-      );
-      break;
-    case "k":
-      topper = (
-        <>
-          <mesh position={[0, dims.height + 0.1, 0]} {...visualProps}><sphereGeometry args={[0.12, 16, 16]} /><meshStandardMaterial {...matProps} /></mesh>
-          <mesh position={[0, dims.height + 0.28, 0]} {...visualProps}><boxGeometry args={[0.07, 0.22, 0.07]} /><meshStandardMaterial {...matProps} /></mesh>
-          <mesh position={[0, dims.height + 0.32, 0]} {...visualProps}><boxGeometry args={[0.2, 0.07, 0.07]} /><meshStandardMaterial {...matProps} /></mesh>
-        </>
-      );
-      break;
-    default:
-      topper = null;
-  }
+  const material = useMemo(
+    () => new THREE.MeshStandardMaterial({
+      color: PIECE_COLOR[color],
+      metalness: color === "w" ? 0.05 : 0.25,
+      roughness: color === "w" ? 0.45 : 0.3,
+    }),
+    [color],
+  );
+
+  if (!geometry) return null;
+  const yaw = rotationY + (type === "n" ? KNIGHT_YAW[color] : 0);
 
   return (
-    <group position={position}>
-      <mesh geometry={getBodyGeometry(dims.height, dims.radius)} {...visualProps}>
-        <meshStandardMaterial {...matProps} />
-      </mesh>
-      {topper}
+    <group position={position} rotation={[0, yaw, 0]} scale={PIECE_SCALE}>
+      <mesh geometry={geometry} material={material} castShadow receiveShadow raycast={() => null} />
+    </group>
+  );
+}
+
+useGLTF.preload(PIECES_URL);
+
+// Thin brass inlay running around the playing surface.
+export function BoardTrim() {
+  const props = { raycast: () => null, castShadow: false, receiveShadow: true };
+  const mat = <meshStandardMaterial color="#b8963a" metalness={0.85} roughness={0.3} />;
+  return (
+    <group position={[0, 0.02, 0]}>
+      <mesh position={[0, 0, 4.035]} {...props}><boxGeometry args={[8.14, 0.04, 0.07]} />{mat}</mesh>
+      <mesh position={[0, 0, -4.035]} {...props}><boxGeometry args={[8.14, 0.04, 0.07]} />{mat}</mesh>
+      <mesh position={[4.035, 0, 0]} {...props}><boxGeometry args={[0.07, 0.04, 8]} />{mat}</mesh>
+      <mesh position={[-4.035, 0, 0]} {...props}><boxGeometry args={[0.07, 0.04, 8]} />{mat}</mesh>
     </group>
   );
 }

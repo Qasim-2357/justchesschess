@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { Suspense, useEffect, useRef, useState, useMemo } from "react";
 import { Chess } from "chess.js";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Lightformer, ContactShadows } from "@react-three/drei";
+import { Environment, Lightformer, ContactShadows, RoundedBox } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import { socket } from "../socket";
 import {
@@ -12,7 +12,10 @@ import {
   createRadialGradientTexture,
   PIECE_HIT_SIZE,
   PieceVisual,
+  BoardTrim,
 } from "./boardVisuals";
+import { reconcile, boardToMap } from "../pieceTracker";
+import { playMove, playCapture, playCheck, isMuted, setMuted } from "../sounds";
 
 const PROMOTION_PIECES = [
   { code: "q", label: "Queen" },
@@ -33,28 +36,65 @@ const FRAME_SIZE = 9.6;
 
 function CameraRig({ presetIndex }) {
   const { camera } = useThree();
-  useFrame(() => {
+  const target = useMemo(() => new THREE.Vector3(), []);
+  useFrame((_, delta) => {
     const preset = CAMERA_PRESETS[presetIndex];
-    camera.position.lerp(
-      { x: preset.position[0], y: preset.position[1], z: preset.position[2] },
-      0.08,
-    );
+    target.set(preset.position[0], preset.position[1], preset.position[2]);
+    // Frame-rate independent easing: the camera glides to a new preset in
+    // about the same time on a 30 fps laptop as on a 144 Hz monitor.
+    camera.position.lerp(target, 1 - Math.exp(-5 * Math.min(delta, 0.1)));
     camera.lookAt(preset.target[0], preset.target[1], preset.target[2]);
   });
   return null;
 }
 
-// A click target for this piece, sized to its own silhouette (see
-// boardVisuals.PIECE_HIT_SIZE) instead of a one-size-fits-all column. It
-// sits right on the piece's own square, so a ray aimed at the piece's
-// visible pixels hits this (close, small) volume before it can reach
-// anything on a square further back — which is what was letting clicks on
-// a short piece (a pawn) fall through to a taller piece one rank behind it
-// (its king) under a raking camera angle.
+const easeInOut = (t) => t * t * (3 - 2 * t);
+
+// A piece that glides to its new square instead of teleporting. Knights
+// hop in a high arc (they jump over things); everything else slides with a
+// small lift so it visibly leaves the board surface. The click target
+// (below) rides along inside the same group, so it always sits on whatever
+// square the piece is currently over.
 function Piece({ type, color, position, square, onSquareClick }) {
   const hit = PIECE_HIT_SIZE[type] ?? { r: 0.3, h: 0.6 };
+  const groupRef = useRef(null);
+  const anim = useRef({ t: 1, dur: 0, from: null, to: position, lift: 0 });
+  const placed = useRef(false);
+
+  useEffect(() => {
+    const g = groupRef.current;
+    if (!g) return;
+    if (!placed.current) {
+      placed.current = true;
+      g.position.set(position[0], position[1], position[2]);
+      anim.current.to = position;
+      return;
+    }
+    const from = g.position.clone();
+    const dist = Math.hypot(position[0] - from.x, position[2] - from.z);
+    if (dist < 0.001) return;
+    anim.current = {
+      t: 0,
+      dur: Math.min(0.8, 0.2 + 0.09 * dist),
+      from,
+      to: position,
+      lift: type === "n" ? 0.7 : Math.min(0.35, 0.12 + 0.03 * dist),
+    };
+  }, [position[0], position[1], position[2]]);
+
+  useFrame((_, delta) => {
+    const a = anim.current;
+    const g = groupRef.current;
+    if (!g || a.t >= 1) return;
+    a.t = Math.min(1, a.t + delta / a.dur);
+    const k = easeInOut(a.t);
+    g.position.x = a.from.x + (a.to[0] - a.from.x) * k;
+    g.position.z = a.from.z + (a.to[2] - a.from.z) * k;
+    g.position.y = a.to[1] + Math.sin(Math.PI * a.t) * a.lift;
+  });
+
   return (
-    <group position={position}>
+    <group ref={groupRef}>
       <PieceVisual type={type} color={color} position={[0, 0, 0]} />
       {onSquareClick && (
         <mesh
@@ -70,7 +110,30 @@ function Piece({ type, color, position, square, onSquareClick }) {
   );
 }
 
-function BoardSquares({ orientation, selectedSquare, legalTargets, cursorSquare, onSquareClick, lightWoodMap, darkWoodMap }) {
+// A captured piece: waits a beat so the capturing piece lands first, then
+// pops up, tips over and shrinks away.
+function CapturedPiece({ type, color, position, onDone }) {
+  const ref = useRef(null);
+  const t = useRef(-0.18);
+  useFrame((_, delta) => {
+    const g = ref.current;
+    if (!g) return;
+    t.current += delta;
+    if (t.current < 0) return;
+    const k = Math.min(1, t.current / 0.45);
+    g.position.y = position[1] + Math.sin(k * Math.PI) * 0.35;
+    g.rotation.z = k * 0.9;
+    g.scale.setScalar(Math.max(0.001, 1 - easeInOut(k)));
+    if (k >= 1) onDone();
+  });
+  return (
+    <group ref={ref} position={position}>
+      <PieceVisual type={type} color={color} position={[0, 0, 0]} />
+    </group>
+  );
+}
+
+function BoardSquares({ orientation, selectedSquare, legalTargets, cursorSquare, lastMove, onSquareClick, lightWoodMap, darkWoodMap }) {
   const squares = useMemo(() => {
     const list = [];
     for (let file = 0; file < 8; file++) {
@@ -89,6 +152,7 @@ function BoardSquares({ orientation, selectedSquare, legalTargets, cursorSquare,
         const isSelected = selectedSquare === name;
         const isLegal = legalTargets.includes(name);
         const isCursor = cursorSquare === name;
+        const isLastMove = lastMove.includes(name);
         return (
           <group key={name} position={coords}>
             <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow raycast={() => null}>
@@ -96,6 +160,12 @@ function BoardSquares({ orientation, selectedSquare, legalTargets, cursorSquare,
               <meshStandardMaterial map={isDark ? darkWoodMap : lightWoodMap} roughness={0.85} metalness={0.03} />
             </mesh>
 
+            {isLastMove && (
+              <mesh position={[0, 0.006, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+                <planeGeometry args={[1, 1]} />
+                <meshBasicMaterial color="#d4b24c" transparent opacity={0.28} depthWrite={false} />
+              </mesh>
+            )}
             {isSelected && (
               <mesh position={[0, 0.011, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
                 <planeGeometry args={[0.96, 0.96]} />
@@ -119,8 +189,7 @@ function BoardSquares({ orientation, selectedSquare, legalTargets, cursorSquare,
                 board surface, not a tall column. A piece standing on a
                 square gets its own, correctly-sized hitbox (see Piece)
                 that sits in front of this one, so this plate only ever
-                catches clicks on bare wood — it no longer reaches up into
-                the screen space of whatever is on the square behind it. */}
+                catches clicks on bare wood. */}
             <mesh
               position={[0, 0.03, 0]}
               visible={false}
@@ -148,10 +217,18 @@ export default function Board3D({ game }) {
   const [legalTargets, setLegalTargets] = useState([]);
   const [pendingPromotion, setPendingPromotion] = useState(null);
   const [presetIndex, setPresetIndex] = useState(0);
+  const [muted, setMutedState] = useState(() => isMuted());
   const [cursorSquare, setCursorSquare] = useState(
     () => (game.color === "white" ? "e2" : "e7"),
   );
   const authoritativeFen = useRef(game.fen);
+
+  // Piece identities persist across moves so they can be animated; see
+  // pieceTracker.js. `ghosts` are just-captured pieces playing their exit.
+  const [pieceList, setPieceList] = useState(() => reconcile([], boardToMap(chess.board())).pieces);
+  const latestPieces = useRef(pieceList);
+  const [ghosts, setGhosts] = useState([]);
+  const [lastMove, setLastMove] = useState([]);
 
   const lightWoodMap = useMemo(() => createWoodTexture("#d8c6a0", "#a8896a"), []);
   const darkWoodMap = useMemo(() => createWoodTexture("#4a1f1a", "#2a0f0c"), []);
@@ -161,6 +238,28 @@ export default function Board3D({ game }) {
     () => createRadialGradientTexture("rgba(255,250,230,0.5)", "rgba(255,250,230,0)"),
     [],
   );
+
+  // Whenever the position changes — our own move, the opponent's, or a
+  // rollback after a rejected move — work out what moved, animate it, and
+  // play the matching sound.
+  useEffect(() => {
+    const result = reconcile(latestPieces.current, boardToMap(chess.board()));
+    if (!result.changed) return;
+    latestPieces.current = result.pieces;
+    setPieceList(result.pieces);
+
+    if (result.removed.length) {
+      setGhosts((g) => [...g, ...result.removed]);
+    }
+    if (result.moves.length) {
+      const main = result.moves.find((m) => m.type === "k") ?? result.moves[0];
+      setLastMove([main.from, main.to]);
+    }
+
+    if (chess.inCheck()) playCheck();
+    else if (result.removed.length) playCapture();
+    else if (result.moves.length) playMove();
+  }, [fen, chess]);
 
   useEffect(() => {
     function onUpdate(data) {
@@ -307,19 +406,16 @@ export default function Board3D({ game }) {
     sendMove(from, to, code);
   }
 
-  const pieces = useMemo(() => {
-    const board = chess.board();
-    const list = [];
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        const cell = board[row][col];
-        if (!cell) continue;
-        const square = `${String.fromCharCode(97 + col)}${8 - row}`;
-        list.push({ square, type: cell.type, color: cell.color, coords: squareToCoords(square, game.color) });
-      }
-    }
-    return list;
-  }, [fen, chess, game.color]);
+  const pieces = useMemo(
+    () => pieceList.map((p) => ({ ...p, coords: squareToCoords(p.square, game.color) })),
+    [pieceList, game.color],
+  );
+
+  function toggleMute() {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
+  }
 
   function formatClock(ms) {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -334,7 +430,7 @@ export default function Board3D({ game }) {
       <div style={clockStyle}>Opponent ({topColor}): {formatClock(clocks[topColor])}</div>
 
       <div className="board-canvas-wrap" style={canvasWrapStyle}>
-        <Canvas shadows camera={{ position: CAMERA_PRESETS[0].position, fov: 50 }}>
+        <Canvas shadows camera={{ position: CAMERA_PRESETS[0].position, fov: 50 }} dpr={[1, 2]}>
           <color attach="background" args={["#000000"]} />
           <fog attach="fog" args={["#000000", 18, 42]} />
 
@@ -380,13 +476,12 @@ export default function Board3D({ game }) {
             />
           </mesh>
 
-          {/* The beam's base must stay ABOVE the tallest piece (~0.8) —
-              earlier it reached down to y=0 and its base disk sliced
-              straight through the board and pieces, which is what showed
-              up as a bright line that shifted/flickered as the camera
-              moved. Stopping well short of the board fixes that. */}
-          <mesh position={[0, 5.1, 0]}>
-            <coneGeometry args={[3.2, 7.8, 32, 1, true]} />
+          {/* The beam's base must stay ABOVE the tallest piece — earlier it
+              reached down to y=0 and its base disk sliced straight through
+              the board and pieces, which is what showed up as a bright line
+              that shifted/flickered as the camera moved. */}
+          <mesh position={[0, 5.6, 0]}>
+            <coneGeometry args={[3.2, 7.2, 32, 1, true]} />
             <meshBasicMaterial
               map={beamTexture}
               transparent
@@ -406,37 +501,56 @@ export default function Board3D({ game }) {
             resolution={512}
           />
 
-          <mesh position={[0, -FRAME_HEIGHT / 2, 0]} receiveShadow castShadow>
-            <boxGeometry args={[FRAME_SIZE, FRAME_HEIGHT, FRAME_SIZE]} />
+          <RoundedBox
+            args={[FRAME_SIZE, FRAME_HEIGHT, FRAME_SIZE]}
+            radius={0.08}
+            smoothness={4}
+            position={[0, -FRAME_HEIGHT / 2, 0]}
+            receiveShadow
+            castShadow
+          >
             <meshStandardMaterial map={frameWoodMap} roughness={0.4} metalness={0.15} />
-          </mesh>
+          </RoundedBox>
+
+          <BoardTrim />
 
           <BoardSquares
             orientation={game.color}
             selectedSquare={selectedSquare}
             legalTargets={legalTargets}
             cursorSquare={cursorSquare}
+            lastMove={lastMove}
             onSquareClick={handleSquareClick}
             lightWoodMap={lightWoodMap}
             darkWoodMap={darkWoodMap}
           />
-          {pieces.map((p) => (
-            <Piece
-              key={p.square}
-              type={p.type}
-              color={p.color}
-              position={p.coords}
-              square={p.square}
-              onSquareClick={handleSquareClick}
-            />
-          ))}
+
+          <Suspense fallback={null}>
+            {pieces.map((p) => (
+              <Piece
+                key={p.id}
+                type={p.type}
+                color={p.color}
+                position={p.coords}
+                square={p.square}
+                onSquareClick={handleSquareClick}
+              />
+            ))}
+            {ghosts.map((g) => (
+              <CapturedPiece
+                key={g.id}
+                type={g.type}
+                color={g.color}
+                position={squareToCoords(g.square, game.color)}
+                onDone={() => setGhosts((list) => list.filter((x) => x.id !== g.id))}
+              />
+            ))}
+          </Suspense>
 
           {/* Bloom's threshold must stay high — at the lower threshold we
               had before, it was catching ordinary specular highlights on
-              the wood (e.g. near the pawns) and inflating them into the
-              bright smeared streak that got worse as the camera moved.
-              Restricting it to only very bright pixels (the beam/glow)
-              keeps the mood without that side effect. */}
+              the wood and inflating them into a bright smeared streak that
+              got worse as the camera moved. */}
           <EffectComposer multisampling={0}>
             <Bloom luminanceThreshold={0.85} luminanceSmoothing={0.15} intensity={0.35} />
           </EffectComposer>
@@ -454,6 +568,13 @@ export default function Board3D({ game }) {
               {i + 1}
             </button>
           ))}
+          <button
+            style={cameraButtonStyle}
+            onClick={toggleMute}
+            title={muted ? "Sound off — click to turn on" : "Sound on — click to mute"}
+          >
+            {muted ? "🔇" : "🔊"}
+          </button>
         </div>
 
         {pendingPromotion && (
@@ -494,7 +615,7 @@ const vignetteStyle = {
   background: "radial-gradient(ellipse at center, transparent 45%, #000 92%)",
 };
 const clockStyle = { width: "min(96vw, 900px)", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#fff" };
-const cameraButtonRowStyle = { position: "absolute", top: 8, right: 8, display: "flex", gap: 6 };
+const cameraButtonRowStyle = { position: "absolute", top: 8, right: 8, display: "flex", gap: 6, zIndex: 2 };
 const keyboardHintStyle = { fontSize: 12, color: "#777", margin: 0 };
 const cameraButtonStyle = { width: 28, height: 28, background: "rgba(0,0,0,0.6)", color: "#fff", border: "1px solid #333", borderRadius: 4, cursor: "pointer", fontSize: 12 };
 const overlayStyle = { position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 5 };
