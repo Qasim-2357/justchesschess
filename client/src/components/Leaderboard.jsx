@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { SERVER_URL } from "../api";
 
-// A persistent side panel, not a modal — always on screen, no click needed
-// to open it. The signed-in player's own row is highlighted gold if it's
-// in the visible list; if they're ranked lower down (or not ranked yet),
-// their row is pinned at the bottom below a divider instead, the way
-// Brawl Stars / Contest of Champions always show "you are #N" even when
-// you're nowhere near the top.
-export default function Leaderboard({ currentUsername, refreshSignal }) {
+// A persistent side panel, not a modal — on screen by default, no click
+// needed to open it. The ✕ in its header hides it (App.jsx then shows a
+// small "Leaderboard" button in its place to bring it back). The signed-in
+// player's own row is highlighted gold if it's in the visible list; if
+// they're ranked lower down (or not ranked yet), their row is pinned at the
+// bottom below a divider instead, the way Brawl Stars / Contest of Champions
+// always show "you are #N" even when you're nowhere near the top.
+export default function Leaderboard({ currentUsername, refreshSignal, onClose }) {
   const [rows, setRows] = useState([]);
   const [me, setMe] = useState(null);
   const [minGames, setMinGames] = useState(5);
@@ -48,7 +49,19 @@ export default function Leaderboard({ currentUsername, refreshSignal }) {
 
   return (
     <div style={panelStyle}>
-      <h2 style={titleStyle}>Leaderboard</h2>
+      <div style={headerRowStyle}>
+        <h2 style={titleStyle}>Leaderboard</h2>
+        {onClose && (
+          <button
+            style={closeButtonStyle}
+            onClick={onClose}
+            title="Hide leaderboard"
+            aria-label="Hide leaderboard"
+          >
+            ✕
+          </button>
+        )}
+      </div>
 
       {loading && <p style={mutedStyle}>Loading...</p>}
       {error && <p style={{ color: "#ff8a8a", fontSize: 13 }}>{error}</p>}
@@ -123,12 +136,32 @@ const panelStyle = {
   overflow: "hidden",
 };
 
-const titleStyle = {
+const headerRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
   margin: "0 0 12px",
+};
+
+const titleStyle = {
+  margin: 0,
   fontWeight: 400,
   fontSize: 16,
   color: "#d4b24c",
   letterSpacing: 0.5,
+};
+
+// Plain ✕ with no box, so it doesn't compete with the title.
+const closeButtonStyle = {
+  background: "none",
+  border: "none",
+  color: "#999",
+  fontSize: 16,
+  lineHeight: 1,
+  padding: "4px 6px",
+  margin: "-4px -6px -4px 0",
+  cursor: "pointer",
+  fontFamily: "inherit",
 };
 
 const mutedStyle = { color: "#888", fontSize: 13 };

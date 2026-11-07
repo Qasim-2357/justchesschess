@@ -27,9 +27,11 @@ const PROMOTION_PIECES = [
 const CAMERA_PRESETS = [
   { label: "Broadcast", position: [0, 9.5, 11], target: [0, 0.2, 0] },
   { label: "Right side", position: [15, 6.5, 0], target: [0, 0.4, 0] },
-  { label: "Top-down", position: [0, 16, 0.01], target: [0, 0, 0] },
+  { label: "Top-down", position: [0, 12.5, 0.01], target: [0, 0, 0] },
   { label: "Left side", position: [-15, 6.5, 0], target: [0, 0.4, 0] },
 ];
+
+const DEFAULT_PRESET = 2; // Top-down
 
 const FRAME_HEIGHT = 0.5;
 const FRAME_SIZE = 9.6;
@@ -46,6 +48,12 @@ function CameraRig({ presetIndex }) {
     camera.lookAt(preset.target[0], preset.target[1], preset.target[2]);
   });
   return null;
+}
+
+// Piece placement + side to move — the part of a FEN that identifies a
+// position, ignoring move counters and the en-passant field.
+function positionKey(fen) {
+  return fen.split(" ").slice(0, 2).join(" ");
 }
 
 const easeInOut = (t) => t * t * (3 - 2 * t);
@@ -216,12 +224,16 @@ export default function Board3D({ game }) {
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [legalTargets, setLegalTargets] = useState([]);
   const [pendingPromotion, setPendingPromotion] = useState(null);
-  const [presetIndex, setPresetIndex] = useState(0);
+  // Start on the top-down view (preset 3): from the low broadcast angle the
+  // pawns hide behind the pieces in front of them and are hard to click.
+  const [presetIndex, setPresetIndex] = useState(DEFAULT_PRESET);
   const [muted, setMutedState] = useState(() => isMuted());
   const [cursorSquare, setCursorSquare] = useState(
     () => (game.color === "white" ? "e2" : "e7"),
   );
   const authoritativeFen = useRef(game.fen);
+  // Set while one of our own moves is on its way to the server. See onUpdate.
+  const pendingMove = useRef({ key: null, timer: null });
 
   // Piece identities persist across moves so they can be animated; see
   // pieceTracker.js. `ghosts` are just-captured pieces playing their exit.
@@ -268,6 +280,26 @@ export default function Board3D({ game }) {
       // Only clear the current selection when a move actually happened,
       // otherwise a routine clock tick wipes out whatever the player was
       // in the middle of selecting.
+      //
+      // A move is applied to the board optimistically the instant it is
+      // played. The server's once-a-second clock tick carries the CURRENT
+      // position, and one that left the server just before our move arrived
+      // reaches us afterwards still showing the OLD position — applying it
+      // snapped the piece back (and un-captured the captured piece) until
+      // the real confirmation landed, which looked like the piece stepping
+      // back and lunging forward again. While our move is unconfirmed, only
+      // the matching position is accepted; anything else is a stale tick
+      // whose clocks we keep but whose position we ignore.
+      const pending = pendingMove.current;
+      if (pending.key && data.fen) {
+        if (positionKey(data.fen) !== pending.key) {
+          if (data.clocks) setClocks(data.clocks);
+          return;
+        }
+        clearTimeout(pending.timer);
+        pending.key = null;
+      }
+
       const positionChanged = data.fen && data.fen !== authoritativeFen.current;
 
       if (data.fen) {
@@ -284,6 +316,8 @@ export default function Board3D({ game }) {
       setError("");
     }
     function onError(data = {}) {
+      clearTimeout(pendingMove.current.timer);
+      pendingMove.current.key = null;
       chess.load(authoritativeFen.current);
       setFen(authoritativeFen.current);
       setError(data.error || "Move rejected.");
@@ -362,6 +396,11 @@ export default function Board3D({ game }) {
     setSelectedSquare(null);
     setLegalTargets([]);
     setError("");
+    // Remember what the server should confirm; give up waiting after 5 s so
+    // a lost reply can never freeze the board.
+    clearTimeout(pendingMove.current.timer);
+    pendingMove.current.key = positionKey(chess.fen());
+    pendingMove.current.timer = setTimeout(() => { pendingMove.current.key = null; }, 5000);
     socket.emit("game:move", { gameId: game.gameId, from, to, ...(promotion ? { promotion } : {}) });
   }
 
@@ -430,7 +469,7 @@ export default function Board3D({ game }) {
       <div style={clockStyle}>Opponent ({topColor}): {formatClock(clocks[topColor])}</div>
 
       <div className="board-canvas-wrap" style={canvasWrapStyle}>
-        <Canvas shadows camera={{ position: CAMERA_PRESETS[0].position, fov: 50 }} dpr={[1, 2]}>
+        <Canvas shadows camera={{ position: CAMERA_PRESETS[DEFAULT_PRESET].position, fov: 50 }} dpr={[1, 2]}>
           <color attach="background" args={["#000000"]} />
           <fog attach="fog" args={["#000000", 18, 42]} />
 

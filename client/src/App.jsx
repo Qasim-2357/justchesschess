@@ -28,7 +28,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState("");
   const [leaderboardRefresh, setLeaderboardRefresh] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(true);
 
   function handleLogout() {
     localStorage.removeItem(STORAGE_KEY);
@@ -183,30 +183,19 @@ export default function App() {
         />
       )}
 
-      {/* Left HUD panel: the leaderboard is always on screen — no button to
-          click to open it — and pins the signed-in player's own standing
-          even when they're off the visible list, the way a mobile game's
-          side panel does. */}
-      <div className="leaderboard-region" style={leftPanelStyle}>
-        <button
-          className="btn leaderboard-toggle"
-          onClick={() => setLeaderboardOpen((open) => !open)}
-          aria-expanded={leaderboardOpen}
-          aria-controls="leaderboard-panel"
-        >
-          {leaderboardOpen ? "Close leaderboard" : "Leaderboard"}
-        </button>
-        <div id="leaderboard-panel" className={leaderboardOpen ? "leaderboard-drawer is-open" : "leaderboard-drawer"}>
-          <button
-            className="btn leaderboard-close"
-            onClick={() => setLeaderboardOpen(false)}
-            aria-label="Close leaderboard"
-          >
-            ×
-          </button>
-          <Leaderboard currentUsername={auth.user.username} refreshSignal={leaderboardRefresh} />
+      {showLeaderboard ? (
+        <div style={leftPanelStyle}>
+          <Leaderboard
+            currentUsername={auth.user.username}
+            refreshSignal={leaderboardRefresh}
+            onClose={() => setShowLeaderboard(false)}
+          />
         </div>
-      </div>
+      ) : (
+        <button className="btn" style={leaderboardTabStyle} onClick={() => setShowLeaderboard(true)}>
+          Leaderboard
+        </button>
+      )}
 
       {/* Center stays empty chrome so the board (AmbientBoard or the real
           interactive Board3D) is the only thing ever drawn there — nothing
@@ -298,6 +287,11 @@ const leftPanelStyle = {
   left: 20,
   width: PANEL_WIDTH,
   zIndex: 2,
+};
+
+const leaderboardTabStyle = {
+  position: "fixed", top: 20, left: 20, zIndex: 2,
+  padding: "8px 16px", fontSize: 13,
 };
 
 const rightPanelStyle = {
